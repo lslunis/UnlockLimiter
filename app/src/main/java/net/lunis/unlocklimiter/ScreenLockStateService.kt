@@ -1,5 +1,7 @@
 package net.lunis.unlocklimiter
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.Service
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -8,6 +10,7 @@ import android.content.IntentFilter
 import android.os.IBinder
 import android.os.SystemClock.elapsedRealtime
 import android.util.Log
+import androidx.core.app.NotificationCompat
 
 
 class ScreenLockStateService : Service() {
@@ -19,8 +22,16 @@ class ScreenLockStateService : Service() {
     private var shouldLockAt: Long = 0
 
     override fun onCreate() {
+        Log.w("ScreenLockStateService", "On create")
         super.onCreate()
-        // TODO: startForeground(1, foregroundNotification)
+        val channel =
+            NotificationChannel("nudges", "Nudges", NotificationManager.IMPORTANCE_HIGH)
+        val notificationManager: NotificationManager =
+            getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.createNotificationChannel(channel)
+        val foregroundNotification = NotificationCompat.Builder(this, "nudges")
+            .setSmallIcon(android.R.drawable.ic_menu_close_clear_cancel).build()
+        startForeground(1, foregroundNotification)
         // TODO: read *Period from storage
         receiver = object : BroadcastReceiver() {
             override fun onReceive(contxt: Context?, intent: Intent?) {
@@ -28,22 +39,16 @@ class ScreenLockStateService : Service() {
                     return
                 }
 
-                // TODO: remove after choosing the most appropriate lock/unlock intents
-                Log.w("ScreenLockStateService", intent.action)
-
                 when (intent.action) {
-                    Intent.ACTION_SCREEN_ON -> onUnlock()
+                    Intent.ACTION_USER_PRESENT -> onUnlock()
                     Intent.ACTION_SCREEN_OFF -> onLock()
                 }
 
             }
         }
-        // TODO: prune list after choosing the most appropriate lock/unlock intents
         val filter = IntentFilter()
         filter.addAction(Intent.ACTION_SCREEN_OFF)
-        filter.addAction(Intent.ACTION_SCREEN_ON)
         filter.addAction(Intent.ACTION_USER_PRESENT)
-        filter.addAction(Intent.ACTION_USER_UNLOCKED)
         registerReceiver(receiver, filter)
     }
 
@@ -53,7 +58,7 @@ class ScreenLockStateService : Service() {
     }
 
     override fun onBind(intent: Intent): IBinder {
-        // TODO: get updated *Period settings from MainActivity
+        TODO("get updated *Period settings from MainActivity")
     }
 
     fun onUnlock() {
