@@ -7,59 +7,67 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
+import android.os.PowerManager
 import android.os.SystemClock.elapsedRealtime
+import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 
 
 class ScreenLockStateService : Service() {
+    private lateinit var handler: Handler
     private lateinit var receiver: BroadcastReceiver
-    private lateinit var nudgeChannel: NotificationChannel
-    private var sessionPeriod: Long = 3_600_000
-    private var restPeriod: Long = 300_000
-    private var nagPeriod: Long = 15_000
+    private var sessionPeriod: Long = 20_000
+    private var restPeriod: Long = 10_000
+    private var nudgePeriod: Long = 3_000
     private var didLockAt: Long = 0
     private var shouldLockAt: Long = 0
 
     override fun onCreate() {
         super.onCreate()
-        val foregroundChannel =
-            NotificationChannel(
-                "foreground",
-                "Unlock Limiter",
-                NotificationManager.IMPORTANCE_LOW
-            )
+        handler = Handler(Looper.getMainLooper())
 
-        nudgeChannel =
-            NotificationChannel("nudge", "Nudges", NotificationManager.IMPORTANCE_HIGH)
-        val notificationManager: NotificationManager =
+        val nm: NotificationManager =
             getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        notificationManager.createNotificationChannel(foregroundChannel)
-        notificationManager.createNotificationChannel(nudgeChannel)
+        nm.createNotificationChannels(
+            listOf(
+                NotificationChannel(
+                    "foreground",
+                    "Unlock Limiter",
+                    NotificationManager.IMPORTANCE_LOW
+                ),
 
-
+                NotificationChannel(
+                    "nudge",
+                    "Nudges",
+                    NotificationManager.IMPORTANCE_HIGH
+                )
+            )
+        )
         val foregroundNotification = NotificationCompat.Builder(this, "foreground")
-            .setSmallIcon(android.R.drawable.ic_menu_close_clear_cancel)
+            .setSmallIcon(R.drawable.session)
             .build()
         startForeground(1, foregroundNotification)
+
         // TODO: read *Period from storage
         receiver = object : BroadcastReceiver() {
             override fun onReceive(contxt: Context?, intent: Intent?) {
-                if (intent == null) {
-                    return
-                }
-
+                if (intent == null) return
                 when (intent.action) {
                     Intent.ACTION_USER_PRESENT -> onUnlock()
                     Intent.ACTION_SCREEN_OFF -> onLock()
                 }
-
             }
         }
         val filter = IntentFilter()
         filter.addAction(Intent.ACTION_SCREEN_OFF)
         filter.addAction(Intent.ACTION_USER_PRESENT)
         registerReceiver(receiver, filter)
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        if (pm.isInteractive) onUnlock() else onLock()
     }
 
     override fun onDestroy() {
@@ -77,24 +85,30 @@ class ScreenLockStateService : Service() {
             shouldLockAt = now + sessionPeriod
         }
         if (now < shouldLockAt) {
-            nagAt(shouldLockAt)
+            nudgeAt(shouldLockAt)
         } else {
-            nag()
+            nudge()
         }
     }
 
     fun onLock() {
         didLockAt = elapsedRealtime()
-        // TODO: clear nag handler
+        handler.removeCallbacksAndMessages(null)
     }
 
-    fun nag() {
+    fun nudge() {
         val now = elapsedRealtime()
-        // TODO: notify {now - shouldLockAt} excess
-        nagAt(now + nagPeriod)
+        NotificationManagerCompat.from(this).notify(
+            1,
+            NotificationCompat.Builder(this, "nudge")
+                .setSmallIcon(R.drawable.rest)
+                .setContentText((now - shouldLockAt).toString())
+                .build()
+        )
+        nudgeAt(now + nudgePeriod)
     }
 
-    fun nagAt(time: Long) {
-        // TODO: set nag handler
+    fun nudgeAt(time: Long) {
+        handler.postAtTime(Runnable { nudge() }, time)
     }
 }
