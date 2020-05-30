@@ -18,11 +18,13 @@ import androidx.core.app.NotificationManagerCompat
 
 
 class ScreenLockStateService : Service() {
+    private val foregroundId: Int = 1
+    private val nudgeId: Int = 2
     private lateinit var handler: Handler
     private lateinit var receiver: BroadcastReceiver
-    private var sessionPeriod: Long = 20_000
-    private var restPeriod: Long = 10_000
-    private var nudgePeriod: Long = 3_000
+    private var sessionPeriod: Long = 600_000
+    private var restPeriod: Long = 300_000
+    private var nudgePeriod: Long = 10_000
     private var didLockAt: Long = 0
     private var shouldLockAt: Long = 0
 
@@ -50,7 +52,7 @@ class ScreenLockStateService : Service() {
         val foregroundNotification = NotificationCompat.Builder(this, "foreground")
             .setSmallIcon(R.drawable.session)
             .build()
-        startForeground(1, foregroundNotification)
+        startForeground(foregroundId, foregroundNotification)
 
         // TODO: read *Period from storage
         receiver = object : BroadcastReceiver() {
@@ -81,14 +83,13 @@ class ScreenLockStateService : Service() {
 
     fun onUnlock() {
         val now = elapsedRealtime()
-        if (now - didLockAt >= restPeriod) {
+        if (shouldLockAt == 0L || now - didLockAt >= restPeriod) {
             shouldLockAt = now + sessionPeriod
+            NotificationManagerCompat.from(this).cancel(nudgeId)
         }
-        if (now < shouldLockAt) {
-            nudgeAt(shouldLockAt)
-        } else {
-            nudge()
-        }
+        val nudgeDelay = shouldLockAt - now
+        if (nudgeDelay > 0) nudgeAfter(nudgeDelay) else nudge()
+
     }
 
     fun onLock() {
@@ -99,16 +100,16 @@ class ScreenLockStateService : Service() {
     fun nudge() {
         val now = elapsedRealtime()
         NotificationManagerCompat.from(this).notify(
-            1,
+            nudgeId,
             NotificationCompat.Builder(this, "nudge")
                 .setSmallIcon(R.drawable.rest)
-                .setContentText((now - shouldLockAt).toString())
+                .setContentText("Seconds over limit: " + ((now - shouldLockAt) / 1000))
                 .build()
         )
-        nudgeAt(now + nudgePeriod)
+        nudgeAfter(nudgePeriod)
     }
 
-    fun nudgeAt(time: Long) {
-        handler.postAtTime(Runnable { nudge() }, time)
+    fun nudgeAfter(delay: Long) {
+        handler.postDelayed(Runnable { nudge() }, delay)
     }
 }

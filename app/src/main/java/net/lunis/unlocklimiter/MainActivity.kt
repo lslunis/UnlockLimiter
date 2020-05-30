@@ -10,6 +10,5 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         startForegroundService(Intent(this, ScreenLockStateService::class.java))
-
     }
 }
