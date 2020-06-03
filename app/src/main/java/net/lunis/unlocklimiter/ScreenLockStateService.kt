@@ -1,5 +1,6 @@
 package net.lunis.unlocklimiter
 
+import android.app.KeyguardManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
@@ -10,9 +11,7 @@ import android.content.IntentFilter
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
-import android.os.PowerManager
 import android.os.SystemClock.elapsedRealtime
-import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 
@@ -25,8 +24,8 @@ class ScreenLockStateService : Service() {
     private var sessionPeriod: Long = 600_000
     private var restPeriod: Long = 300_000
     private var nudgePeriod: Long = 10_000
-    private var didLockAt: Long = 0
-    private var shouldLockAt: Long = 0
+    private var restStart: Long = 0
+    private var sessionEnd: Long = 0
 
     override fun onCreate() {
         super.onCreate()
@@ -57,19 +56,15 @@ class ScreenLockStateService : Service() {
         // TODO: read *Period from storage
         receiver = object : BroadcastReceiver() {
             override fun onReceive(contxt: Context?, intent: Intent?) {
-                if (intent == null) return
-                when (intent.action) {
-                    Intent.ACTION_USER_PRESENT -> onUnlock()
-                    Intent.ACTION_SCREEN_OFF -> onLock()
-                }
+                if (intent != null) onChange()
             }
         }
         val filter = IntentFilter()
         filter.addAction(Intent.ACTION_SCREEN_OFF)
+        filter.addAction(Intent.ACTION_SCREEN_ON)
         filter.addAction(Intent.ACTION_USER_PRESENT)
         registerReceiver(receiver, filter)
-        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-        if (pm.isInteractive) onUnlock() else onLock()
+        onChange()
     }
 
     override fun onDestroy() {
@@ -81,20 +76,22 @@ class ScreenLockStateService : Service() {
         TODO("get updated *Period settings from MainActivity")
     }
 
-    fun onUnlock() {
+    fun onChange() {
         val now = elapsedRealtime()
-        if (shouldLockAt == 0L || now - didLockAt >= restPeriod) {
-            shouldLockAt = now + sessionPeriod
-            NotificationManagerCompat.from(this).cancel(nudgeId)
+        val km = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
+        if (km.isKeyguardLocked) {
+            if (restStart == 0L) restStart = now
+            handler.removeCallbacksAndMessages(null)
+
+        } else {
+            if (sessionEnd == 0L || restStart != 0L && now - restStart >= restPeriod) {
+                sessionEnd = now + sessionPeriod
+                NotificationManagerCompat.from(this).cancel(nudgeId)
+            }
+            restStart = 0
+            val nudgeDelay = sessionEnd - now
+            if (nudgeDelay > 0) nudgeAfter(nudgeDelay) else nudge()
         }
-        val nudgeDelay = shouldLockAt - now
-        if (nudgeDelay > 0) nudgeAfter(nudgeDelay) else nudge()
-
-    }
-
-    fun onLock() {
-        didLockAt = elapsedRealtime()
-        handler.removeCallbacksAndMessages(null)
     }
 
     fun nudge() {
@@ -103,7 +100,7 @@ class ScreenLockStateService : Service() {
             nudgeId,
             NotificationCompat.Builder(this, "nudge")
                 .setSmallIcon(R.drawable.rest)
-                .setContentText("Seconds over limit: " + ((now - shouldLockAt) / 1000))
+                .setContentText("Seconds over limit: " + ((now - sessionEnd) / 1000))
                 .build()
         )
         nudgeAfter(nudgePeriod)
